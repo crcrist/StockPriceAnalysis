@@ -1,3 +1,4 @@
+# data_collector.py
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from datetime import datetime, timedelta
@@ -14,6 +15,39 @@ class DataCollector:
             raise ValueError("API key not found in environment variables")
         self.base_url = "https://financialmodelingprep.com/api/v3"
         self.session = requests.Session()
+
+    def check_api_status(self):
+        """Check API quota status"""
+        endpoint = f"{self.base_url}/stock/list"  # Using a different endpoint to test API
+        params = {'apikey': self.api_key}
+        
+        try:
+            response = self.session.get(endpoint, params=params)
+            if response.status_code == 200:
+                return {
+                    'calls_remaining': "Available",
+                    'status': "API Connected",
+                    'time_until_reset': "24 hours"
+                }
+            elif response.status_code == 429:  # Too Many Requests
+                return {
+                    'calls_remaining': "0",
+                    'status': "Quota Exceeded",
+                    'time_until_reset': "24 hours"
+                }
+            else:
+                return {
+                    'calls_remaining': "Unknown",
+                    'status': f"Error: {response.status_code}",
+                    'time_until_reset': "Unknown"
+                }
+        except Exception as e:
+            print(f"Error checking API status: {str(e)}")
+            return {
+                'calls_remaining': "Error",
+                'status': "Connection Failed",
+                'time_until_reset': "Unknown"
+            }
     
     def is_valid_stock(self, stock):
         """Check if a stock entry is valid for processing"""
@@ -108,23 +142,23 @@ class DataCollector:
                 
         return results
 
-def print_api_info():
-    """Print API usage information"""
+def test_single_stock_api():
+    """Test API with a single stock request"""
     collector = DataCollector()
-    endpoint = f"{collector.base_url}/is-the-market-open"
-    params = {'apikey': collector.api_key}
+    test_symbol = "AAPL"  # Using Apple as a test case
     
     try:
+        endpoint = f"{collector.base_url}/quote/{test_symbol}"
+        params = {'apikey': collector.api_key}
+        
         response = collector.session.get(endpoint, params=params)
+        
         if response.status_code == 200:
-            print("API connection successful")
-            print("Response:", response.json())
+            return True, "API working correctly"
+        elif response.status_code == 429:
+            return False, "API quota exceeded"
         else:
-            print(f"API request failed: {response.status_code}")
-            print("Response:", response.text)
+            return False, f"API error: {response.status_code}"
+            
     except Exception as e:
-        print(f"Error checking API: {str(e)}")
-
-if __name__ == "__main__":
-    # Test the API connection
-    print_api_info()
+        return False, f"Connection error: {str(e)}"

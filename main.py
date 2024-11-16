@@ -4,15 +4,23 @@ from datetime import datetime, timedelta
 import pandas as pd
 import time
 from database import StockDatabase
-from data_collector import DataCollector
+from data_collector import DataCollector, test_single_stock_api
 from stock_predictor import StockPredictor
 
-def update_database():
+def update_database(limit=None, symbols=None):
     try:
         print("Starting database update...")
         db = StockDatabase()
         collector = DataCollector()
         predictor = StockPredictor()
+        
+        # Check API status first
+        api_status = collector.check_api_status()
+        if api_status['status'] != "API Connected":
+            st.error(f"API Status: {api_status['status']}")
+            return
+        
+        st.info(f"API Status: {api_status['status']}")
         
         print("Fetching stock list...")
         stocks = collector.get_all_stocks()
@@ -20,6 +28,12 @@ def update_database():
         if not stocks:
             st.error("No valid stocks found. Please check the API connection and filters.")
             return
+            
+        # Apply limits or filter by symbols if specified
+        if limit:
+            stocks = stocks[:limit]
+        elif symbols:
+            stocks = [s for s in stocks if s['symbol'] in symbols]
             
         total_stocks = len(stocks)
         st.info(f"Found {total_stocks} stocks to process")
@@ -96,6 +110,57 @@ def update_database():
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
         raise e
+
+def selective_update():
+    st.sidebar.markdown("### Update Options")
+    
+    # Test API first
+    api_working, message = test_single_stock_api()
+    
+    update_options = st.sidebar.radio(
+        "Choose update type:",
+        ["Full Update", "Top Stocks Only", "Selected Stocks", "Check API Status Only"]
+    )
+    
+    collector = DataCollector()
+    api_status = collector.check_api_status()
+    
+    st.sidebar.info(f"""
+    API Status: {api_status['status']}
+    Status: {api_status['calls_remaining']}
+    Reset: {api_status['time_until_reset']}
+    """)
+    
+    if not api_working:
+        st.sidebar.error(f"API Test Failed: {message}")
+        return
+        
+    if update_options == "Full Update":
+        if st.sidebar.button("Update All Stocks"):
+            update_database()
+            
+    elif update_options == "Top Stocks Only":
+        num_stocks = st.sidebar.slider("Number of stocks to update", 10, 100, 25)
+        if st.sidebar.button(f"Update Top {num_stocks} Stocks"):
+            update_database(limit=num_stocks)
+            
+    elif update_options == "Selected Stocks":
+        db = StockDatabase()
+        available_symbols = pd.read_sql_query(
+            "SELECT DISTINCT symbol FROM stocks ORDER BY symbol", 
+            db.conn
+        )['symbol'].tolist()
+        
+        selected_symbols = st.sidebar.multiselect(
+            "Select stocks to update",
+            available_symbols
+        )
+        
+        if st.sidebar.button("Update Selected Stocks") and selected_symbols:
+            update_database(symbols=selected_symbols)
+            
+    elif update_options == "Check API Status Only":
+        st.sidebar.success(f"API Status: {api_status['status']}")
 
 def create_dashboard():
     st.title("US Stock Market Analytics Dashboard")
@@ -180,7 +245,7 @@ def create_dashboard():
                 hist_data['daily_return'] = hist_data['close'].pct_change()
                 
                 # Calculate metrics
-                volatility = hist_data['daily_return'].std() * (252 ** 0.5) * 100  # Annualized volatility
+                volatility = hist_data['daily_return'].std() * (252 ** 0.5) * 100
                 max_drawdown = ((hist_data['close'].cummax() - hist_data['close']) / hist_data['close'].cummax()).max() * 100
                 
                 # Display additional metrics
@@ -197,5 +262,5 @@ def create_dashboard():
                 """)
 
 if __name__ == "__main__":
-    st.sidebar.button("Update Database", on_click=update_database)
+    selective_update()
     create_dashboard()
